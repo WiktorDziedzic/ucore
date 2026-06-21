@@ -12,7 +12,8 @@ module dbus_arbiter
     dbus.master data_ram_dbus,
     dbus.master gpio_dbus,
     dbus.master timer_dbus,
-    dbus.master uart_dbus
+    dbus.master uart_dbus,
+    dbus.master ethernet_dbus
 );
 
 
@@ -24,7 +25,8 @@ typedef enum logic [2:0] {
     DATA_RAM_READOUT,
     GPIO_READOUT,
     TIMER_READOUT,
-    UART_READOUT
+    UART_READOUT,
+    ETHERNET_READOUT
 } state_t;
 
 
@@ -62,6 +64,9 @@ always_comb begin
         end else if (core_dbus.addr inside {[UART_BASE_ADDRESS:UART_END_ADDRESS]}) begin
             if (uart_dbus.rreq)
                 state_nxt = UART_READOUT;
+        end else if (core_dbus.addr inside {[ETHERNET_BASE_ADDRESS:ETHERNET_END_ADDRESS]}) begin
+            if (ethernet_dbus.rreq && !ethernet_dbus.stall)
+                state_nxt = ETHERNET_READOUT;
         end
     end
     CODE_ROM_READOUT: begin
@@ -77,6 +82,9 @@ always_comb begin
         state_nxt = REQUESTS_PROCESSING;
     end
     UART_READOUT: begin
+        state_nxt = REQUESTS_PROCESSING;
+    end
+    ETHERNET_READOUT: begin
         state_nxt = REQUESTS_PROCESSING;
     end
     endcase
@@ -116,6 +124,12 @@ always_comb begin
     uart_dbus.rreq = 1'b0;
     uart_dbus.wreq = 1'b0;
     uart_dbus.wdata = 32'b0;
+
+    ethernet_dbus.addr = 32'b0;
+    ethernet_dbus.be = 4'b0;
+    ethernet_dbus.rreq = 1'b0;
+    ethernet_dbus.wreq = 1'b0;
+    ethernet_dbus.wdata = 32'b0;
 
     case (state)
     REQUESTS_PROCESSING: begin
@@ -169,6 +183,16 @@ always_comb begin
             uart_dbus.rreq = core_dbus.rreq;
             uart_dbus.wreq = core_dbus.wreq;
             uart_dbus.wdata = core_dbus.wdata;
+        end else if (core_dbus.addr inside {[ETHERNET_BASE_ADDRESS:ETHERNET_END_ADDRESS]}) begin
+            core_dbus.stall = ethernet_dbus.stall;
+            core_dbus.rvalid = ethernet_dbus.rvalid;
+            core_dbus.rdata = ethernet_dbus.rdata;
+
+            ethernet_dbus.addr = core_dbus.addr;
+            ethernet_dbus.be = core_dbus.be;
+            ethernet_dbus.rreq = core_dbus.rreq;
+            ethernet_dbus.wreq = core_dbus.wreq;
+            ethernet_dbus.wdata = core_dbus.wdata;
         end
     end
     CODE_ROM_READOUT: begin
@@ -225,6 +249,17 @@ always_comb begin
         uart_dbus.rreq = core_dbus.rreq;
         uart_dbus.wreq = core_dbus.wreq;
         uart_dbus.wdata = core_dbus.wdata;
+    end
+    ETHERNET_READOUT: begin
+        core_dbus.stall = ethernet_dbus.stall;
+        core_dbus.rvalid = ethernet_dbus.rvalid;
+        core_dbus.rdata = ethernet_dbus.rdata;
+
+        ethernet_dbus.addr = core_dbus.addr;
+        ethernet_dbus.be = core_dbus.be;
+        ethernet_dbus.rreq = core_dbus.rreq;
+        ethernet_dbus.wreq = core_dbus.wreq;
+        ethernet_dbus.wdata = core_dbus.wdata;
     end
     endcase
 end

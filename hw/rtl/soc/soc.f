@@ -9,4 +9,5 @@ uart_clock_generator.sv
 uart_receiver.sv
 uart_transmitter.sv
 uart.sv
+ethernet.sv
 soc.sv

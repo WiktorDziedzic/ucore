@@ -18,7 +18,8 @@ OBJS = \
     build/gpio.o \
     build/reg.o \
     build/timer.o \
-    build/uart.o
+    build/uart.o \
+    build/ethernet.o
 
 .PHONY: all clean
 
