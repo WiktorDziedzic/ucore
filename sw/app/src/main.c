@@ -1,46 +1,105 @@
+#include <stdint.h>
+
 #include <soc/gpio.h>
 #include <soc/uart.h>
 #include <soc/ethernet.h>
 
+#define MAX_PAYLOAD_BYTES 128
+
+static uint32_t read_uint(const char *prompt)
+{
+    char buf[32];
+    uint32_t value = 0;
+
+    uart_write(prompt);
+
+    if (uart_read(buf, sizeof(buf)) != 0) {
+        uart_write("invalid input\r\n");
+        return 0;
+    }
+
+    for (int i = 0; buf[i] != '\0' && buf[i] != '\r' && buf[i] != '\n'; ++i) {
+        if (buf[i] >= '0' && buf[i] <= '9')
+            value = value * 10 + (uint32_t)(buf[i] - '0');
+    }
+
+    return value;
+}
+
+static uint32_t prng_next(uint32_t x)
+{
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    return x;
+}
+
+static void fill_random_payload(uint8_t *payload, uint32_t len, uint32_t *seed)
+{
+    uint32_t rnd = *seed;
+
+    for (uint32_t i = 0; i < len; ++i) {
+        rnd = prng_next(rnd);
+        payload[i] = (uint8_t)(rnd & 0xff);
+    }
+
+    *seed = rnd;
+}
+
 int main(void)
 {
+    uint8_t payload[MAX_PAYLOAD_BYTES];
+    uint32_t seed = 0x12345678;
+    int led = 0;
+
     uart_init();
 
+    uart_write("\r\nucore ethernet generator\r\n");
+
     while (1) {
-        for (int i = 0; i < 16; ++i) {
-            gpio_set_dout(i);
+        uint32_t ifg_cycles;
+        uint32_t frame_count;
+        uint32_t payload_len;
 
-            uint8_t payload[] = {
-                0xde, 0xad, 0xbe, 0xef,
-                0x01, 0x02, 0x03, 0x04
-            };
+        gpio_set_dout(led++);
 
-            ethernet_disable_loopback();
+        ifg_cycles = read_uint("\r\nIFG cycles: ");
+        frame_count = read_uint("Frame count: ");
+        payload_len = read_uint("Payload bytes: ");
 
-            ethernet_set_dst_mac(0xffffffffffffull);
-            ethernet_set_src_mac(0x123400000002ull);
-            ethernet_set_ethertype(0x0800);
+        if (payload_len == 0)
+            payload_len = 1;
 
-            ethernet_set_ipv4_src(ETHERNET_IPV4_ADDR(192, 168, 1, 2));
-            ethernet_set_ipv4_dst(ETHERNET_IPV4_ADDR(192, 168, 1, 90));
-            ethernet_set_ipv4_cfg0(64, 17, 0);
-            ethernet_set_ipv4_cfg1(0, 2, 0);
-            ethernet_set_ipv4_checksum(0);
+        if (payload_len > MAX_PAYLOAD_BYTES)
+            payload_len = MAX_PAYLOAD_BYTES;
 
-            ethernet_set_udp_ports(1234, 1235);
-            ethernet_set_udp_length(0);
-            ethernet_set_udp_checksum(0);
+        if (frame_count == 0)
+            frame_count = 1;
 
-            ethernet_set_tx_payload(payload, sizeof(payload));
-            ethernet_set_ifg_cycles(100);
-            ethernet_set_frame_count(1);
+        fill_random_payload(payload, payload_len, &seed);
 
-            ethernet_trigger();
+        ethernet_disable_loopback();
 
-            uart_write((i & 0x1) ? "pong\r\n" : "ping\r\n");
+        ethernet_set_dst_mac(0xffffffffffffull);
+        ethernet_set_src_mac(0x123400000002ull);
+        ethernet_set_ethertype(0x0800);
 
-            for (int i = 0; i < 1000000; ++i)
-                asm volatile ("nop");
-        }
+        ethernet_set_ipv4_src(ETHERNET_IPV4_ADDR(192, 168, 1, 2));
+        ethernet_set_ipv4_dst(ETHERNET_IPV4_ADDR(192, 168, 1, 90));
+        ethernet_set_ipv4_cfg0(64, 17, 0);
+        ethernet_set_ipv4_cfg1(0, 2, 0);
+        ethernet_set_ipv4_checksum(0);
+
+        ethernet_set_udp_ports(50000, 50001);
+        ethernet_set_udp_length(0);
+        ethernet_set_udp_checksum(0);
+
+        ethernet_set_tx_payload(payload, payload_len);
+        ethernet_set_ifg_cycles(ifg_cycles);
+        ethernet_set_frame_count(frame_count);
+
+        ethernet_trigger();
+
+        uart_write("TX started\r\n");
     }
 }

@@ -47,20 +47,30 @@ uint8_t uart_read_byte(void)
 
 int uart_read(char *dest, int len)
 {
-    for (int i = 0; i < len; ++i) {
-        dest[i] = uart_read_byte();
+    int pos = 0;
 
-        if (dest[i] == '\n') {
-            dest[i] = '\0';
+    while (pos < len - 1) {
+        char c = uart_read_byte();
+
+        if (c == '\r' || c == '\n') {
+            dest[pos] = '\0';
+            uart_write("\r\n");
             return 0;
-        } else if (dest[i] == '\b') {
-            if (i)
-                i -= 2;
-            else
-                i -= 1;
         }
+
+        if (c == '\b' || c == 127) {
+            if (pos > 0) {
+                --pos;
+                uart_write("\b \b");
+            }
+            continue;
+        }
+
+        dest[pos++] = c;
+        uart_write_byte(c);
     }
 
+    dest[pos] = '\0';
     return 1;
 }
 
