@@ -45,8 +45,15 @@ logic [1:0]  avalon_response;
 
 logic        read_pending, read_pending_nxt;
 
-// csr_eth__in_t  csr_hwif_in;
+csr_eth__in_t  csr_hwif_in;
 csr_eth__out_t csr_hwif_out;
+
+logic          eth_tx_en_meta, eth_tx_en_meta_nxt;
+logic          eth_tx_en_sync, eth_tx_en_sync_nxt;
+logic          eth_tx_en_sync_d, eth_tx_en_sync_d_nxt;
+
+logic          tx_busy_status, tx_busy_status_nxt;
+logic          tx_seen_tx_en, tx_seen_tx_en_nxt;
 
 logic          ethernet_trigger;
 
@@ -123,6 +130,8 @@ assign tx_sop = tx_valid;
 assign tx_eop = tx_valid;
 assign tx_frame_accepted = tx_valid && tx_ready;
 
+assign csr_hwif_in.status.busy.next = 1'b0;
+
 assign loopback[0] = csr_hwif_out.loopback_ctrl.loopback_direct_lvl.value;
 assign loopback[1] = csr_hwif_out.loopback_ctrl.loopback_analyzer_lvl.value;
 assign loopback[2] = csr_hwif_out.loopback_ctrl.loopback_eth_ip_lvl.value;
@@ -145,7 +154,7 @@ csr_eth u_csr_eth (
     .avalon_readdata,
     .avalon_response,
 
-    // .hwif_in(csr_hwif_in),
+    .hwif_in(csr_hwif_in),
     .hwif_out(csr_hwif_out)
 );
 
@@ -249,6 +258,52 @@ always_comb begin
                 tx_valid_nxt = 1'b1;
             end
         end
+    end
+end
+
+always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+        eth_tx_en_meta   <= 1'b0;
+        eth_tx_en_sync   <= 1'b0;
+        eth_tx_en_sync_d <= 1'b0;
+
+        tx_busy_status   <= 1'b0;
+        tx_seen_tx_en    <= 1'b0;
+    end else begin
+        eth_tx_en_meta   <= eth_tx_en_meta_nxt;
+        eth_tx_en_sync   <= eth_tx_en_sync_nxt;
+        eth_tx_en_sync_d <= eth_tx_en_sync_d_nxt;
+
+        tx_busy_status   <= tx_busy_status_nxt;
+        tx_seen_tx_en    <= tx_seen_tx_en_nxt;
+    end
+end
+
+always_comb begin
+    eth_tx_en_meta_nxt   = eth_tx_en;
+    eth_tx_en_sync_nxt   = eth_tx_en_meta;
+    eth_tx_en_sync_d_nxt = eth_tx_en_sync;
+
+    tx_busy_status_nxt   = tx_busy_status;
+    tx_seen_tx_en_nxt    = tx_seen_tx_en;
+
+    if (ethernet_trigger) begin
+        tx_busy_status_nxt = 1'b1;
+        tx_seen_tx_en_nxt  = 1'b0;
+    end
+
+    if (eth_tx_en_sync) begin
+        tx_seen_tx_en_nxt = 1'b1;
+    end
+
+    if (tx_busy_status && tx_seen_tx_en && eth_tx_en_sync_d && !eth_tx_en_sync) begin
+        tx_busy_status_nxt = 1'b0;
+        tx_seen_tx_en_nxt  = 1'b0;
+    end
+
+    if (tx_frame_accepted && tx_frames_remaining == 32'd1) begin
+        tx_busy_status_nxt = 1'b0;
+        tx_seen_tx_en_nxt  = 1'b0;
     end
 end
 

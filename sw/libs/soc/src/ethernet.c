@@ -93,9 +93,9 @@ void ethernet_set_ipv4_cfg1(uint16_t identification, uint8_t flags, uint16_t fra
 {
     uint32_t value = 0u;
 
-    value |= ((uint32_t)identification)          << 0;
-    value |= ((uint32_t)(flags & 0x7u))          << 16;
-    value |= ((uint32_t)(fragment_offset & 0x1fffu)) << 19;
+    value |= ((uint32_t)identification)               << 0;
+    value |= ((uint32_t)(flags & 0x7u))               << 16;
+    value |= ((uint32_t)(fragment_offset & 0x1fffu))  << 19;
 
     reg_write(ETHERNET_IPV4_CFG1_ADDRESS, value);
 }

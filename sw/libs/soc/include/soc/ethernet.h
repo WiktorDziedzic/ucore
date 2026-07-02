@@ -50,6 +50,7 @@ void ethernet_disable_loopback(void);
 
 void ethernet_set_tx_length(uint16_t length);
 void ethernet_set_frame_count(uint32_t frame_count);
+void ethernet_set_ifg_cycles(uint32_t cycles);
 
 void ethernet_set_dst_mac(uint64_t mac);
 void ethernet_set_src_mac(uint64_t mac);
@@ -70,7 +71,5 @@ bool ethernet_set_tx_word(uint32_t index, uint32_t value);
 void ethernet_clear_tx_data(void);
 void ethernet_set_tx_words(const uint32_t *words, size_t word_count);
 void ethernet_set_tx_payload(const uint8_t *payload, size_t payload_len);
-
-void ethernet_set_ifg_cycles(uint32_t cycles);
 
 #endif

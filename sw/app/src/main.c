@@ -46,6 +46,43 @@ static void fill_random_payload(uint8_t *payload, uint32_t len, uint32_t *seed)
     *seed = rnd;
 }
 
+static void delay_cycles(uint32_t cycles)
+{
+    for (volatile uint32_t i = 0; i < cycles; ++i) {
+        asm volatile ("nop");
+    }
+}
+
+static void configure_and_send_single_frame(uint8_t *payload,
+                                            uint32_t payload_len,
+                                            uint32_t ifg_cycles)
+{
+    ethernet_disable_loopback();
+
+    ethernet_set_dst_mac(0xffffffffffffull);
+    ethernet_set_src_mac(0x123400000002ull);
+    ethernet_set_ethertype(0x0800);
+
+    ethernet_set_ipv4_src(ETHERNET_IPV4_ADDR(192, 168, 1, 2));
+    ethernet_set_ipv4_dst(ETHERNET_IPV4_ADDR(192, 168, 1, 90));
+    ethernet_set_ipv4_cfg0(64, 17, 0);
+    ethernet_set_ipv4_cfg1(0, 2, 0);
+    ethernet_set_ipv4_checksum(0);
+
+    ethernet_set_udp_ports(50000, 50001);
+    ethernet_set_udp_length(0);
+    ethernet_set_udp_checksum(0);
+
+    ethernet_set_tx_payload(payload, payload_len);
+
+    ethernet_set_ifg_cycles(ifg_cycles);
+    ethernet_set_frame_count(1);
+
+    ethernet_trigger();
+
+    delay_cycles(ifg_cycles);
+}
+
 int main(void)
 {
     uint8_t payload[MAX_PAYLOAD_BYTES];
@@ -54,18 +91,18 @@ int main(void)
 
     uart_init();
 
-    uart_write("\r\nucore ethernet generator\r\n");
+    uart_write("\r\nucore ethernet cpu-driven generator\r\n");
 
     while (1) {
+        uint32_t payload_len;
         uint32_t ifg_cycles;
         uint32_t frame_count;
-        uint32_t payload_len;
 
         gpio_set_dout(led++);
 
-        ifg_cycles = read_uint("\r\nIFG cycles: ");
-        frame_count = read_uint("Frame count: ");
-        payload_len = read_uint("Payload bytes: ");
+        payload_len  = read_uint("\r\nPayload bytes: ");
+        ifg_cycles   = read_uint("IFG cycles: ");
+        frame_count  = read_uint("Frame count: ");
 
         if (payload_len == 0)
             payload_len = 1;
@@ -76,30 +113,13 @@ int main(void)
         if (frame_count == 0)
             frame_count = 1;
 
-        fill_random_payload(payload, payload_len, &seed);
-
-        ethernet_disable_loopback();
-
-        ethernet_set_dst_mac(0xffffffffffffull);
-        ethernet_set_src_mac(0x123400000002ull);
-        ethernet_set_ethertype(0x0800);
-
-        ethernet_set_ipv4_src(ETHERNET_IPV4_ADDR(192, 168, 1, 2));
-        ethernet_set_ipv4_dst(ETHERNET_IPV4_ADDR(192, 168, 1, 90));
-        ethernet_set_ipv4_cfg0(64, 17, 0);
-        ethernet_set_ipv4_cfg1(0, 2, 0);
-        ethernet_set_ipv4_checksum(0);
-
-        ethernet_set_udp_ports(50000, 50001);
-        ethernet_set_udp_length(0);
-        ethernet_set_udp_checksum(0);
-
-        ethernet_set_tx_payload(payload, payload_len);
-        ethernet_set_ifg_cycles(ifg_cycles);
-        ethernet_set_frame_count(frame_count);
-
-        ethernet_trigger();
-
         uart_write("TX started\r\n");
+
+        for (uint32_t frame_idx = 0; frame_idx < frame_count; ++frame_idx) {
+            fill_random_payload(payload, payload_len, &seed);
+            configure_and_send_single_frame(payload, payload_len, ifg_cycles);
+        }
+
+        uart_write("TX finished\r\n");
     }
 }
