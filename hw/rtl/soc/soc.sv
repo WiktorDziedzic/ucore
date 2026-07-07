@@ -8,7 +8,25 @@ module soc (
     input logic         uart_sin,
 
     output logic [31:0] gpio_dout,
-    input logic [31:0]  gpio_din
+    input logic [31:0]  gpio_din,
+
+    output logic        eth_mdc,
+    inout  logic        eth_mdio,
+    output logic        eth_ref_clk,
+    output logic        eth_rstn,
+
+    input  logic        eth_tx_clk,
+    output logic        eth_tx_en,
+    output logic [3:0]  eth_txd,
+
+    input  logic        eth_rx_clk,
+    input  logic        eth_rx_dv,
+    input  logic [3:0]  eth_rxd,
+    input  logic        eth_col,
+    input  logic        eth_crs,
+    input  logic        eth_rxerr,
+
+    output logic [3:0]  eth_led
 );
 
 
@@ -22,6 +40,7 @@ dbus data_ram_dbus ();
 dbus gpio_dbus ();
 dbus timer_dbus ();
 dbus uart_dbus ();
+dbus ethernet_dbus ();
 
 
 /* Submodules placement */
@@ -44,7 +63,8 @@ dbus_arbiter u_dbus_arbiter (
     .data_ram_dbus,
     .gpio_dbus,
     .timer_dbus,
-    .uart_dbus
+    .uart_dbus,
+    .ethernet_dbus
 );
 
 code_rom u_code_rom (
@@ -87,6 +107,31 @@ uart u_uart (
 
     .sout(uart_sout),
     .sin(uart_sin)
+);
+
+ethernet u_ethernet (
+    .clk,
+    .rst_n,
+
+    .dbus(ethernet_dbus),
+
+    .eth_mdc,
+    .eth_mdio,
+    .eth_ref_clk,
+    .eth_rstn,
+
+    .eth_tx_clk,
+    .eth_tx_en,
+    .eth_txd,
+
+    .eth_rx_clk,
+    .eth_rx_dv,
+    .eth_rxd,
+    .eth_col,
+    .eth_crs,
+    .eth_rxerr,
+
+    .eth_led
 );
 
 endmodule
