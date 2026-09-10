@@ -44,6 +44,8 @@ logic [31:0] avalon_readdata;
 logic [1:0]  avalon_response;
 
 logic        read_pending, read_pending_nxt;
+logic        read_response_valid;
+logic [31:0] read_response_data;
 
 csr_eth__in_t  csr_hwif_in;
 csr_eth__out_t csr_hwif_out;
@@ -54,6 +56,7 @@ logic          eth_tx_en_sync_d, eth_tx_en_sync_d_nxt;
 
 logic          tx_busy_status, tx_busy_status_nxt;
 logic          tx_seen_tx_en, tx_seen_tx_en_nxt;
+logic          tx_start_request;
 
 logic          ethernet_trigger;
 
@@ -70,6 +73,9 @@ logic [7:0]    tx_payload_len;
 logic [31:0]   tx_frames_remaining, tx_frames_remaining_nxt;
 logic [1023:0] tx_register_data;
 logic          tx_frame_accepted;
+logic          tx_frame_in_flight, tx_frame_in_flight_nxt;
+logic          tx_end_of_frame;
+logic          tx_configuration_valid;
 logic          tx_active, tx_active_nxt;
 logic [31:0]   tx_gap_counter, tx_gap_counter_nxt;
 
@@ -84,6 +90,10 @@ logic [7:0]    rx_empty;
 /* Signals assignments */
 
 assign ethernet_trigger = csr_hwif_out.ctrl.start.value;
+
+assign tx_start_request = avalon_write && !avalon_waitrequest &&
+                          avalon_address == 7'd0 &&
+                          avalon_byteenable[0] && avalon_writedata[0];
 
 assign bypass = 1'b0;
 
@@ -129,8 +139,12 @@ assign tx_data = tx_register_data;
 assign tx_sop = tx_valid;
 assign tx_eop = tx_valid;
 assign tx_frame_accepted = tx_valid && tx_ready;
+assign tx_end_of_frame = tx_seen_tx_en &&
+                         eth_tx_en_sync_d && !eth_tx_en_sync;
+assign tx_configuration_valid = tx_payload_len != 8'd0 &&
+                                csr_hwif_out.frame_count.value.value != 32'd0;
 
-assign csr_hwif_in.status.busy.next = 1'b0;
+assign csr_hwif_in.status.busy.next = tx_busy_status_nxt;
 
 assign loopback[0] = csr_hwif_out.loopback_ctrl.loopback_direct_lvl.value;
 assign loopback[1] = csr_hwif_out.loopback_ctrl.loopback_analyzer_lvl.value;
@@ -219,11 +233,13 @@ always_ff @(posedge clk or negedge rst_n) begin
         tx_active <= 1'b0;
         tx_frames_remaining <= 32'd0;
         tx_gap_counter <= 32'd0;
+        tx_frame_in_flight <= 1'b0;
     end else begin
         tx_valid <= tx_valid_nxt;
         tx_active <= tx_active_nxt;
         tx_frames_remaining <= tx_frames_remaining_nxt;
         tx_gap_counter <= tx_gap_counter_nxt;
+        tx_frame_in_flight <= tx_frame_in_flight_nxt;
     end
 end
 
@@ -232,29 +248,35 @@ always_comb begin
     tx_active_nxt = tx_active;
     tx_frames_remaining_nxt = tx_frames_remaining;
     tx_gap_counter_nxt = tx_gap_counter;
+    tx_frame_in_flight_nxt = tx_frame_in_flight;
 
     if (ethernet_trigger) begin
-        tx_active_nxt = tx_payload_len != 8'd0;
-        tx_frames_remaining_nxt = csr_hwif_out.frame_count.value.value;
+        tx_active_nxt = tx_configuration_valid;
+        tx_frames_remaining_nxt = tx_configuration_valid ?
+                                  csr_hwif_out.frame_count.value.value : 32'd0;
         tx_valid_nxt = 1'b0;
         tx_gap_counter_nxt = 32'd0;
+        tx_frame_in_flight_nxt = 1'b0;
     end else begin
         if (tx_frame_accepted) begin
             tx_valid_nxt = 1'b0;
-            tx_gap_counter_nxt = csr_hwif_out.ifg_cycles.value.value;
+            tx_frame_in_flight_nxt = 1'b1;
 
-            if (tx_frames_remaining != 32'd0) begin
-                if (tx_frames_remaining == 32'd1) begin
-                    tx_active_nxt = 1'b0;
-                    tx_frames_remaining_nxt = 32'd0;
-                end else begin
-                    tx_frames_remaining_nxt = tx_frames_remaining - 32'd1;
-                end
+            if (tx_frames_remaining != 32'd0)
+                tx_frames_remaining_nxt = tx_frames_remaining - 32'd1;
+        end else if (tx_end_of_frame && tx_frame_in_flight) begin
+            tx_frame_in_flight_nxt = 1'b0;
+
+            if (tx_frames_remaining == 32'd0) begin
+                tx_active_nxt = 1'b0;
+                tx_gap_counter_nxt = 32'd0;
+            end else begin
+                tx_gap_counter_nxt = csr_hwif_out.ifg_cycles.value.value;
             end
-        end else if (!tx_valid && tx_active) begin
+        end else if (!tx_valid && tx_active && !tx_frame_in_flight) begin
             if (tx_gap_counter != 32'd0) begin
                 tx_gap_counter_nxt = tx_gap_counter - 32'd1;
-            end else begin
+            end else if (tx_frames_remaining != 32'd0) begin
                 tx_valid_nxt = 1'b1;
             end
         end
@@ -287,31 +309,35 @@ always_comb begin
     tx_busy_status_nxt   = tx_busy_status;
     tx_seen_tx_en_nxt    = tx_seen_tx_en;
 
-    if (ethernet_trigger) begin
-        tx_busy_status_nxt = 1'b1;
+    if (tx_start_request || ethernet_trigger) begin
+        tx_busy_status_nxt = tx_configuration_valid;
         tx_seen_tx_en_nxt  = 1'b0;
-    end
+    end else begin
+        if (eth_tx_en_sync) begin
+            tx_seen_tx_en_nxt = 1'b1;
+        end
 
-    if (eth_tx_en_sync) begin
-        tx_seen_tx_en_nxt = 1'b1;
-    end
+        if (tx_busy_status && tx_end_of_frame) begin
+            tx_seen_tx_en_nxt = 1'b0;
 
-    if (tx_busy_status && tx_seen_tx_en && eth_tx_en_sync_d && !eth_tx_en_sync) begin
-        tx_busy_status_nxt = 1'b0;
-        tx_seen_tx_en_nxt  = 1'b0;
-    end
-
-    if (tx_frame_accepted && tx_frames_remaining == 32'd1) begin
-        tx_busy_status_nxt = 1'b0;
-        tx_seen_tx_en_nxt  = 1'b0;
+            if (tx_frames_remaining == 32'd0)
+                tx_busy_status_nxt = 1'b0;
+        end
     end
 end
 
 always_ff @(posedge clk or negedge rst_n) begin
-    if (!rst_n)
+    if (!rst_n) begin
         read_pending <= 1'b0;
-    else
+        read_response_valid <= 1'b0;
+        read_response_data <= 32'b0;
+    end else begin
         read_pending <= read_pending_nxt;
+        read_response_valid <= avalon_readdatavalid;
+
+        if (avalon_readdatavalid)
+            read_response_data <= avalon_readdata;
+    end
 end
 
 always_comb begin
@@ -326,7 +352,7 @@ always_comb begin
 
     dbus.stall = 1'b1;
     dbus.rvalid = 1'b0;
-    dbus.rdata = avalon_readdata;
+    dbus.rdata = read_response_data;
 
     read_pending_nxt = read_pending;
 
@@ -342,10 +368,10 @@ always_comb begin
         if (dbus.rreq && !avalon_waitrequest)
             read_pending_nxt = 1'b1;
     end else begin
-        dbus.stall = !avalon_readdatavalid;
-        dbus.rvalid = avalon_readdatavalid;
+        dbus.stall = !read_response_valid;
+        dbus.rvalid = read_response_valid;
 
-        if (avalon_readdatavalid)
+        if (read_response_valid)
             read_pending_nxt = 1'b0;
     end
 end

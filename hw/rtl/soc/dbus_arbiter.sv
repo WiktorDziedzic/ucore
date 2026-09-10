@@ -85,7 +85,8 @@ always_comb begin
         state_nxt = REQUESTS_PROCESSING;
     end
     ETHERNET_READOUT: begin
-        state_nxt = REQUESTS_PROCESSING;
+        if (ethernet_dbus.rvalid)
+            state_nxt = REQUESTS_PROCESSING;
     end
     endcase
 end

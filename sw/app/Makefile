@@ -13,6 +13,7 @@ CPU_FLAGS = \
 
 CFLAGS = \
     $(CPU_FLAGS) \
+    -O2 \
     -mcmodel=medany \
     -I$(SOC_INC) \
     -fno-common \

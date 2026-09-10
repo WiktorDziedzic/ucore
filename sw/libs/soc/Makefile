@@ -4,6 +4,7 @@ AR = riscv32-unknown-elf-ar
 CFLAGS ?= \
     -march=rv32i \
     -mabi=ilp32 \
+    -O2 \
     -mcmodel=medany \
     -fno-common \
     -fvisibility=hidden \
